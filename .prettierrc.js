@@ -1,5 +1,5 @@
 module.exports = {
-  arrowParens: 'always',
+  arrowParens: "always",
   bracketSameLine: true,
   bracketSpacing: false,
   singleQuote: false,
@@ -7,5 +7,5 @@ module.exports = {
   tabWidth: 2,
   printWidth: 170,
   semi: true,
-  trailingComma: 'all',
+  trailingComma: "all",
 };

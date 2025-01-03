@@ -1,35 +1,66 @@
-import React, {useState} from "react";
-import {StyleSheet, Text, TouchableOpacity, View} from "react-native";
+import React, {useEffect, useRef, useState} from "react";
+import {Dimensions, StyleSheet, Text, TouchableOpacity, View} from "react-native";
 import moment from "moment";
-import {PanGestureHandler} from "react-native-gesture-handler";
-import Animated, {useSharedValue, useAnimatedStyle, useAnimatedGestureHandler, withSpring} from "react-native-reanimated";
+import {FlatList, PanGestureHandler} from "react-native-gesture-handler";
+import Animated, {useSharedValue, useAnimatedStyle, useAnimatedGestureHandler, withTiming, runOnJS} from "react-native-reanimated";
+import {ArrowLeft} from "../../assets/svgs";
+import {generateCalendar} from "../../functions/calendar";
+
+const weekWidth = Dimensions.get("window").width - 32;
+const dayWidth = weekWidth / 7;
 
 const Calendar = () => {
-  const [selectedDate, setSelectedDate] = useState(moment().toDate());
-  const [currentMonth, setCurrentMonth] = useState(moment().startOf("month").toDate());
+  const ref = useRef<FlatList>(null);
+  const currentMonthRef = useRef(moment().startOf("month").toDate());
 
-  const collapsedHeight = 30; // 주간 높이
-  const expandedHeight = 200; // 월간 높이
+  const [currentMonth, setCurrentMonth] = useState(moment().startOf("month").toDate());
+  const [selectedDate, setSelectedDate] = useState(moment().toDate());
+  const [selectedWeek, setSelectedWeek] = useState(0);
+  const [isCollapsed, setIsCollapsed] = useState(true);
+
   const translateY = useSharedValue(0);
-  const isCollapsed = useSharedValue(false);
+  const weekTranslateY = useSharedValue(0);
+
+  const collapsedHeight = 40;
+  const expandedHeight = 200;
+
+  const weekHeight = collapsedHeight;
+
+  const calendarDays = generateCalendar(currentMonth);
 
   const gestureHandler = useAnimatedGestureHandler({
     onStart: (event, context) => {
       context.startY = translateY.value;
+      context.startWeekTranslateY = weekTranslateY.value;
     },
     onActive: (event, context) => {
+      runOnJS(setIsCollapsed)(false);
       const newTranslateY = context.startY + event.translationY;
+
       translateY.value = Math.max(Math.min(newTranslateY, expandedHeight - collapsedHeight), 0);
-    },
-    onEnd: () => {
-      if (translateY.value > (expandedHeight - collapsedHeight) / 2) {
-        // 기준치 이상 내려가면 월간 뷰로 전환
-        translateY.value = withSpring(expandedHeight - collapsedHeight);
-        isCollapsed.value = false;
+
+      if (selectedWeek === 0) {
+        weekTranslateY.value = 0;
       } else {
-        // 기준치 이하면 주간 뷰로 전환
-        translateY.value = withSpring(0);
-        isCollapsed.value = true;
+        const progress = translateY.value / (expandedHeight - collapsedHeight);
+        const interpolatedWeekTranslateY = -selectedWeek * weekHeight * (1 - progress);
+        weekTranslateY.value = Math.max(Math.min(interpolatedWeekTranslateY, 0), -selectedWeek * weekHeight);
+      }
+    },
+    onEnd: (event, context) => {
+      const shouldExpandToMonthlyView = translateY.value > (expandedHeight - collapsedHeight) / 2;
+
+      if (shouldExpandToMonthlyView) {
+        weekTranslateY.value = withTiming(0, {duration: 300});
+        translateY.value = withTiming(expandedHeight - collapsedHeight, {duration: 300}, () => {
+          runOnJS(setIsCollapsed)(false);
+        });
+      } else {
+        translateY.value = withTiming(0, {}, () => {
+          runOnJS(setIsCollapsed)(true);
+        });
+
+        weekTranslateY.value = withTiming(-selectedWeek * weekHeight, {duration: 300});
       }
     },
   });
@@ -38,42 +69,85 @@ const Calendar = () => {
     height: collapsedHeight + translateY.value,
   }));
 
-  const generateCalendar = () => {
-    const startOfMonth = moment(currentMonth).startOf("month");
-    const endOfMonth = moment(currentMonth).endOf("month");
+  const weekAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{translateY: weekTranslateY.value}],
+  }));
 
-    const days = [];
-    let current = startOfMonth.clone().startOf("week");
+  useEffect(() => {
+    // 월이 바뀔 떄 선택한 날짜가 없으면 selectedWeek === 0으로 선택된 날짜가 있으면 selectedWeek 가 선택된 날짜에 있게
+    // 현재 월 달력에 선택된 날짜가 없으면 0번째 주로 이동
+    let selectedIndex = calendarDays.findIndex((calendarDay) => moment(calendarDay).isSame(selectedDate, "day"));
+    if (selectedIndex === -1) {
+      console.log("ASDF");
+      setSelectedWeek(0);
+      ref?.current?.scrollToIndex({index: 0});
+    } else {
+      //선택된 날짜가 있는 주로 이동
 
-    while (current.isBefore(endOfMonth.clone().endOf("week"))) {
-      days.push(current.clone());
-      current.add(1, "day");
+      setSelectedWeek(Math.floor(selectedIndex / 7));
+      ref?.current?.scrollToIndex({index: selectedIndex - (selectedIndex % 7)});
     }
+  }, [currentMonth]);
 
-    return days;
-  };
-
-  const renderDays = () => {
-    const calendarDays = generateCalendar();
+  const weekCalendar = () => {
     return (
-      <View style={styles.calendarGrid}>
-        {calendarDays.map((day, index) => {
-          const isSelected = moment(selectedDate).isSame(day, "day");
-          const isCurrentMonth = moment(currentMonth).isSame(day, "month");
+      <FlatList
+        ref={ref}
+        horizontal
+        data={calendarDays}
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        initialScrollIndex={selectedWeek * 7}
+        getItemLayout={(data, index) => ({length: dayWidth, offset: dayWidth * index, index})}
+        keyExtractor={(item, index) => index.toString()}
+        renderItem={({item, index}) => {
+          const isSelected = moment(selectedDate).isSame(item, "day");
+
           return (
             <TouchableOpacity
               key={index}
-              onPress={() => setSelectedDate(day.toDate())}
-              style={[styles.dayContainer, isSelected && styles.selectedDay, !isCurrentMonth && styles.otherMonthDay]}>
-              <Text style={styles.dayText}>{day.date()}</Text>
+              onPress={() => {
+                setSelectedDate(item.toDate());
+                setSelectedWeek(Math.floor(index / 7) % 5);
+              }}
+              style={[styles.dayContainer]}>
+              <Text style={[styles.dayText, isSelected && styles.selectedDay]}>{item.date()}</Text>
             </TouchableOpacity>
           );
-        })}
-      </View>
+        }}
+      />
     );
   };
 
-  const renderDayHeaders = () => {
+  const renderDays = () => {
+    return (
+      <>
+        <Animated.View style={{opacity: isCollapsed ? 1 : 0, position: "absolute", top: 0, zIndex: 100}}>{weekCalendar()}</Animated.View>
+        <Animated.View style={[styles.calendarGrid, weekAnimatedStyle, {opacity: isCollapsed ? 0 : 1}]}>
+          {calendarDays.map((day, index) => {
+            const isSelected = moment(selectedDate).isSame(day, "day");
+            const selectedIndex = calendarDays.findIndex((calendarDay) => moment(calendarDay).isSame(day, "day")) || 0;
+
+            return (
+              <TouchableOpacity
+                key={index}
+                onPress={() => {
+                  ref?.current?.scrollToIndex({index: index - day.day()});
+                  setSelectedDate(day.toDate());
+                  setSelectedWeek(Math.floor(selectedIndex / 7));
+                }}
+                style={[styles.dayContainer]}>
+                <Text style={[styles.dayText, isSelected && styles.selectedDay]}>{day.date()}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
+      </>
+    );
+  };
+
+  // eslint-disable-next-line react/no-unstable-nested-components
+  const WeekOfDays = () => {
     const daysOfWeek = ["일", "월", "화", "수", "목", "금", "토"];
     return (
       <View style={styles.dayHeaders}>
@@ -90,22 +164,20 @@ const Calendar = () => {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => setCurrentMonth(moment(currentMonth).subtract(1, "month").toDate())}>
-          <Text>{"<"}</Text>
+          <ArrowLeft />
         </TouchableOpacity>
         <Text>{moment(currentMonth).format("YYYY년 MM월")}</Text>
         <TouchableOpacity onPress={() => setCurrentMonth(moment(currentMonth).add(1, "month").toDate())}>
-          <Text>{">"}</Text>
+          <ArrowLeft style={{transform: [{rotate: "180deg"}]}} />
         </TouchableOpacity>
       </View>
-      {renderDayHeaders()}
+      <WeekOfDays />
       <PanGestureHandler onGestureEvent={gestureHandler}>
         <Animated.View style={[styles.calendarBody, animatedStyle]}>{renderDays()}</Animated.View>
       </PanGestureHandler>
     </View>
   );
 };
-
-export default Calendar;
 
 const styles = StyleSheet.create({
   container: {
@@ -116,7 +188,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: 16,
+    paddingHorizontal: 8,
   },
   dayHeaders: {
     flexDirection: "row",
@@ -137,7 +210,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   dayContainer: {
-    width: "14.28%",
+    width: dayWidth,
     height: 40,
     justifyContent: "center",
     alignItems: "center",
@@ -146,10 +219,15 @@ const styles = StyleSheet.create({
     color: "black",
   },
   selectedDay: {
+    justifyContent: "center",
+    alignItems: "center",
     backgroundColor: "green",
     borderRadius: 20,
-  },
-  otherMonthDay: {
-    color: "#ccc",
+    width: 30,
+    height: 30,
+    padding: 6,
+    textAlign: "center",
   },
 });
+
+export default Calendar;

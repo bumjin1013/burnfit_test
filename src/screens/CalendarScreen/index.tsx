@@ -1,15 +1,9 @@
-import {StyleSheet, View} from 'react-native';
-import React, {useState} from 'react';
-import Calendar from '../../copmonents/Calendar';
+import {StyleSheet} from "react-native";
+import React from "react";
+import Calendar from "../../copmonents/Calendar";
 
 const CalendarScreen = () => {
-  const [selectedDate, setSelectedDate] = useState(new Date());
-
-  return (
-    <View>
-      <Calendar selectedDate={selectedDate} setSelectedDate={setSelectedDate} />
-    </View>
-  );
+  return <Calendar />;
 };
 
 export default CalendarScreen;
